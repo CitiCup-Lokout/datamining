@@ -31,15 +31,12 @@ def parse_float(row, column):
 
 
 def time_transform(row, column, translate, scale):
-    row[column] -= translate
-    row[column] /= scale
-    return row
-
+    v = row[column]
+    return (row[column] - translate) / scale
 
 def time_inv_transform(row, column, translate, scale):
-    row[column] *= scale
-    row[column] += translate
-    return row
+    v = row[column]
+    return v * scale + translate
 
 
 def random_walk(X, Y, steps, stride=1, n=1, noise=0.5, keep_origin=False):
@@ -95,7 +92,7 @@ def predict_worker():
             timestamp = time.mktime(month_ago.timetuple())
 
             df = df.loc[df['Time']>timestamp]
-            df = df.apply(time_transform, axis=1, args=('Time', timestamp, 60*60))
+            df['Time'] = df.apply(time_transform, axis=1, args=('Time', timestamp, 60*60))
 
             fields = ['FanNum', 'PlayNum']
             prediction = None
@@ -121,7 +118,7 @@ def predict_worker():
                 prediction = np.hstack((prediction, Y_))
             
             pred_df = pd.DataFrame(data=prediction, columns=['Time', 'FanNum', 'PlayNum'])
-            pred_df = pred_df.apply(time_inv_transform, axis=1, args=('Time', timestamp, 60*60))
+            pred_df['Time'] = pred_df.apply(time_inv_transform, axis=1, args=('Time', timestamp, 60*60))
             pred_df = pred_df.apply(parse_int, axis=1, args=('FanNum',))
             pred_df = pred_df.apply(parse_int, axis=1, args=('PlayNum',))
 
