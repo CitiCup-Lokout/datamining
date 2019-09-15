@@ -15,29 +15,31 @@ def write_log(s, verbose=False):
 
 
 def parse_datetime(row, column, fmt='%Y-%m-%d %H:%M:%S'):
+    dt = row[column]
     if isinstance(row[column], str):
-        row[column] = time.mktime(time.strptime(row[column].strip(), fmt))
-    return row
+        dt = time.mktime(time.strptime(row[column].strip(), fmt))
+    return dt
 
 
 def parse_int(row, column):
-    row[column] = int(row[column])
-    return row
+    return int(row[column])
 
 
 def parse_float(row, column):
-    row[column] = float(row[column])
-    return row
+    return float(row[column])
 
 
 def time_transform(row, column, translate, scale):
-    v = row[column]
     return (row[column] - translate) / scale
 
-def time_inv_transform(row, column, translate, scale):
-    v = row[column]
-    return v * scale + translate
 
+def time_inv_transform(row, column, translate, scale):
+    return row[column] * scale + translate
+
+
+def cast_dataframe(df, casts):
+    for col, parser in casts:
+        df[col] = df.apply(parser, axis=1, args=(col,))
 
 def random_walk(X, Y, steps, stride=1, n=1, noise=0.5, keep_origin=False):
     X = X.squeeze()
@@ -73,18 +75,24 @@ def predict_worker():
     if not os.path.exists('../P'):
         os.mkdir('../P')
 
+    up_list = pd.read_json('a.json')
+
     for filename in os.listdir('../A'):
         basename, extname = os.path.splitext(filename)
         if basename.startswith('.'): continue
         if extname.lower() != '.csv': continue
-        
+
+        uid = int(basename)
+        up_info = up_list.loc[up_list['uid'] == uid].iloc[0]
+
         try:
             df = pd.read_csv(os.path.join('../A', filename))
 
-            df = df.apply(parse_datetime, axis=1, args=('Time',))
-            df = df.apply(parse_float, axis=1, args=('FanNum',))
-            df = df.apply(parse_float, axis=1, args=('PlayNum',))
-            df = df.apply(parse_float, axis=1, args=('ChargeNum',))
+            casts = (
+                ('Time', parse_datetime), ('PlayNum', parse_float)
+                , ('FanNum', parse_float), ('ChargeNum', parse_float)
+            )
+            cast_dataframe(df, casts)
             df.sort_values(by='Time', inplace=True, ascending=True)
 
             today = datetime.date.today()
@@ -118,9 +126,20 @@ def predict_worker():
                 prediction = np.hstack((prediction, Y_))
             
             pred_df = pd.DataFrame(data=prediction, columns=['Time', 'FanNum', 'PlayNum'])
+            casts = (('FanNum', parse_int), ('PlayNum', parse_int))
+            cast_dataframe(pred_df, casts)
             pred_df['Time'] = pred_df.apply(time_inv_transform, axis=1, args=('Time', timestamp, 60*60))
-            pred_df = pred_df.apply(parse_int, axis=1, args=('FanNum',))
-            pred_df = pred_df.apply(parse_int, axis=1, args=('PlayNum',))
+
+            def predict_channel_value(row, info):
+                try:
+                    K = (info['ChargesMonthly']/info['ViewsMonthly']) ** 0.5 * 100
+                    N = row['FanNum'] * (row['FanNum']/info['AvgView'] * 2 * (info['AvgScore']/info['AvgView'])) ** 0.5
+                    X = info['IncomeYearly']
+                    channelValue = (X/2) * 3.49 + K * N * math.log(N) / 2
+                except:
+                    channelValue = float('Nan')
+                return channelValue
+            pred_df['ChannelValue'] = pred_df.apply(predict_channel_value, axis=1, args=(up_info,))
 
             s = pred_df.to_json(orient='records')
             path = os.path.join('../P', basename+'.json')

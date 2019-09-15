@@ -13,18 +13,19 @@ def write_log(s, verbose=False):
     with open('dataminer.log', 'a') as f:
         print(s, file=f)
 
+
 def parse_datetime(row, column, fmt='%Y-%m-%d %H:%M:%S'):
+    dt = row[column]
     if isinstance(row[column], str):
-        row[column] = time.mktime(time.strptime(row[column].strip(), fmt))
-    return row
+        dt = time.mktime(time.strptime(row[column].strip(), fmt))
+    return dt
 
 def parse_int(row, column):
-    row[column] = int(row[column])
-    return row
+    return int(row[column])
+
 
 def parse_float(row, column):
-    row[column] = float(row[column])
-    return row
+    return float(row[column])
 
 def fixMergedVideoData(json_buf):
     replacements = (
@@ -56,7 +57,7 @@ def read_historical_json(path):
             , ('Like', parse_float)
         )
         for col, parser in casts:
-            df = df.apply(parser, axis=1, args=(col,))
+            df[col] = df.apply(parser, axis=1, args=(col,))
         return df
 
 class MiningManager:
@@ -92,8 +93,10 @@ def mining_worker():
     write_log("Finished mining at %s" % time.strftime("%Y-%m-%d %H:%M:%S", now))
 
 def compute_index(info, mm):
+    info = info.copy()
+
     uid = info['uid']
-    write_log("Computing uid: %d" % uid)
+    write_log("Computing uid: %d" % uid, verbose=True)
 
     mm.report()
 
@@ -103,7 +106,7 @@ def compute_index(info, mm):
         csv_path = os.path.join('../A', str(uid)+'.csv')
 
         df = pd.read_csv(csv_path)
-        df = df.apply(parse_datetime, axis=1, args=('Time',))
+        df['Time'] = df.apply(parse_datetime, axis=1, args=('Time',))
         df.sort_values('Time', axis=0, inplace=True, ascending=True)
 
         today = datetime.date.today()
@@ -166,24 +169,13 @@ def compute_index(info, mm):
         info['Frequency'] = days_escaped / info['TotalCount']
 
         #######################################################################
-        '''
-        ((50% * 88% * 5/1000 * B * S * 16 + 85% * 12% * 15/1000 * K * B * S * 16)/2）* 3.49 +  K * N * ln(N)/2
-        s=30-7天发布视频数
-        B=平均视频播放量
-        K= （两次根号下月充电/播放比）*10
-        N=粉丝数*根号下[(平均视频播放量/粉丝量）*2*（平均赞赏/平均播放比)]
-
-        (50% * 88% * 5/1000 * B * S * 16 + 85% * 12% * 15/1000 * K * B * S * 16 )
-        这个是频道每年收入
-
-        平均视频收入是
-        (50% * 88% * 5/1000 * B * S * 16 + 85% * 12% * 15/1000 * K * B * S * 16) / (s*16）
-        '''
 
         try:
             L4, L3, O4, N4, P4 = info['ViewsNow'], info['ViewsWeekAgo'], info['AvgView'], info['AvgQuality'], info['RecentCount']
             info['WorkIndex'] = ((N4**1.1 + (L4-L3)/10) * (N4-O4) / O4 * P4 / 30) ** 0.65 / 10
         except:
+            info['WorkIndex'] = float('Nan')
+        if isinstance(info['WorkIndex'], complex):
             info['WorkIndex'] = float('Nan')
 
         K3, K4 = info['FansWeekAgo'], info['FansNow']
@@ -191,42 +183,63 @@ def compute_index(info, mm):
             info['FanIncPercentage'] = (K4 - K3) / K3
         except:
             info['FanIncPercentage'] = float('Nan')
+        if isinstance(info['FanIncPercentage'], complex):
+            info['FanIncPercentage'] = float('Nan')
         try:
             info['FanIncIndex'] = ((K4 - K3) * info['FanIncPercentage']) ** 0.75 * (1 if K4 > K3 else -1)
         except:
             info['FanIncIndex'] = float('Nan')
+        if isinstance(info['FanIncIndex'], complex):
+            info['FanIncIndex'] = float('Nan')
+
+
+        '''
+        （(87 % * 5/1000 + 13 % * 15/1000 * K) * B * S * 30/2）* 3.49 + K * N*ln（N）/ 2
+        s = 30-7天发布视频数
+        B = 平均视频播放量
+        K = （两次根号下月充电/播放比）* 100
+        N = 粉丝数*根号下【（粉丝量/平均视频播放量）* 2 *（平均赞赏/平均播放比）】
+
+        (87 % * 5/1000 + 13 % * 15/1000 * K) * B * S * 30
+        这个是频道每年收入
+
+        平均视频收入是
+        (87 % * 5/1000 + 13 % * 15/1000 * K) * B
+        '''
 
         try:
             S3, R4, K4, L4, L3 = info['WorkIndex'], info['FanIncIndex'], info['FansNow'], info['ViewsNow'], info['ViewsWeekAgo']
             info['SummaryIndex'] = (S3+R4)*(K4/1000+(L4-L3)/10000) ** 0.7 / 1000
         except:
             info['SummaryIndex'] = float('Nan')
+        if isinstance(info['SummaryIndex'], complex):
+            info['SummaryIndex'] = float('Nan')
 
+        S = info['RecentCount']
+        B = info['AvgView']
+        K = (info['ChargesMonthly']/info['ViewsMonthly']) ** 0.5 * 100
+        N = info['FanNum'] * (info['FanNum']/info['AvgView'] * 2 * (info['AvgScore']/info['AvgView'])) ** 0.5
         try:
-            B = info['AvgView']
-            S = info['RecentCount']
-            K = info['ChargesMonthly']/info['ViewsMonthly'] * 10
-            N = info['FanNum'] * (info['AvgView']/info['FanNum'] * 2 * (info['AvgScore']/info['AvgView'])) ** 0.5
-            # info['IncomeYearly'] = info['AvgView']*0.003*12 * info['RecentCount']/1000 \
-            #     + info['SummaryIndex']*400/3000 \
-            #     + info['FanNum']**0.85 * info['RecentCount']**0.7*36 / 300000
-            info['IncomeYearly'] = (0.5 * 0.88 * 5/1000 * B * S * 16 + 0.85 * 0.12 * 15/1000 * K * B * S * 16)
+            info['IncomeYearly'] = ((0.87 * 5/1000 + 0.13 * 15/1000 * K) * B * S * 30)
         except:
+            info['IncomeYearly'] = float('Nan')
+        if isinstance(info['IncomeYearly'], complex):
             info['IncomeYearly'] = float('Nan')
 
         try:
-            info['IncomePerVideo'] = info['IncomeYearly'] / (info['RecentCount']*16)
+            info['IncomePerVideo'] = info['IncomeYearly'] / (info['RecentCount']*30)
         except:
             info['IncomePerVideo'] = 0.0
+        if isinstance(info['IncomePerVideo'], complex):
+            info['IncomePerVideo'] = float('Nan')
 
         try:
             X = info['IncomeYearly']
-            K = info['ChargesMonthly']/info['ViewsMonthly'] * 10
-            N = info['FanNum'] * (info['AvgView']/info['FanNum'] * 2 * (info['AvgScore']/info['AvgView'])) ** 0.5
-            # info['ChannelValue'] = X + X / (1.1**1) + X/(1.1**2) + X/(1.1**3) + X/(1.1**4)
             info['ChannelValue'] = (X/2) * 3.49 + K * N * math.log(N) / 2
         except:
-            info['ChannelValue'] = 0.0
+            info['ChannelValue'] = float('Nan')
+        if isinstance(info['ChannelValue'], complex):
+            info['ChannelValue'] = float('Nan')
 
         #######################################################################
 
@@ -236,7 +249,7 @@ def compute_index(info, mm):
         except:
             info['Face'] = 'Not Found'
     except:
-        write_log("Failed to compute: %d" % uid)
+        write_log("Failed to compute: %d" % uid, verbose=True)
         pass
 
     return info
