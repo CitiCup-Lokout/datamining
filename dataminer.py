@@ -1,4 +1,4 @@
-import os, shutil
+import sys, os, shutil
 import math
 import time
 import datetime
@@ -8,7 +8,7 @@ import requests
 import json
 from threading import Timer
 
-def write_log(s, verbose=False):
+def write_log(s, verbose=True):
     if verbose: print(s)
     with open('dataminer.log', 'a') as f:
         print(s, file=f)
@@ -243,17 +243,19 @@ def compute_index(info, mm):
 
         #######################################################################
 
-        try:
-            url = 'https://api.bilibili.com/x/space/acc/info?mid=%s' % str(uid)
-            info['Face'] = requests.get(url).json()['data']['face']
-        except:
-            info['Face'] = 'Not Found'
-    except:
+        # try:
+        #     url = 'https://api.bilibili.com/x/space/acc/info?mid=%s' % str(uid)
+        #     info['Face'] = requests.get(url).json()['data']['face']
+        # except:
+        #     info['Face'] = 'Not Found'
+    except Exception as e:
         write_log("Failed to compute: %d" % uid, verbose=True)
+        print(e)
         pass
 
     return info
 
+"""
 g_current_times = 0
 g_timeout_interval = 5
 
@@ -266,7 +268,22 @@ def on_timeout():
     write_log("Next execution %s mins later" % g_timeout_interval*g_current_times)
     timer = Timer(g_timeout_interval * 60, on_timeout)
     timer.start()
+"""
 
 if __name__ == "__main__":
     # Run immediately first
-    on_timeout()
+    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+        mining_worker()
+    now = datetime.datetime.now()
+    start_hour = 3
+    if now.timetuple().tm_hour > start_hour:
+        tomorrow = now + datetime.timedelta(days=1)
+        next_time = tomorrow.replace(hour=start_hour, minute=0, second=0)
+    else:
+        next_time = now.replace(hour=start_hour, minute=0, second=0)
+    interval = (next_time-now).seconds
+    write_log("Next execution %d seconds later" % interval)
+
+    timer = Timer(interval, mining_worker)
+    timer.start()
+

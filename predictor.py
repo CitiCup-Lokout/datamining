@@ -1,4 +1,4 @@
-import os, shutil
+import sys, os, shutil
 import datetime
 import time
 import math
@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from threading import Timer
 
-def write_log(s, verbose=False):
+def write_log(s, verbose=True):
     if verbose:
         print(s)
     with open('predictor.log', 'a') as f:
@@ -150,6 +150,7 @@ def predict_worker():
         except Exception as e:
             write_log("Failed to predict %s" % filename, verbose=True)
 
+"""
 g_current_times = 0
 g_timeout_interval = 5
 
@@ -164,8 +165,22 @@ def on_timeout():
               g_timeout_interval*g_current_times)
     timer = Timer(g_timeout_interval * 60, on_timeout)
     timer.start()
-
+"""
 
 if __name__ == "__main__":
     # Run immediately first
-    on_timeout()
+    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+        predict_worker()
+    now = datetime.datetime.now()
+    start_hour = 5
+    if now.timetuple().tm_hour > start_hour:
+        tomorrow = now + datetime.timedelta(days=1)
+        next_time = tomorrow.replace(hour=start_hour, minute=0, second=0)
+    else:
+        next_time = now.replace(hour=start_hour, minute=0, second=0)
+    interval = (next_time-now).seconds
+    write_log("Next execution %d seconds later" % interval)
+
+    timer = Timer(interval, predict_worker)
+    timer.start()
+
