@@ -255,35 +255,30 @@ def compute_index(info, mm):
 
     return info
 
-"""
-g_current_times = 0
-g_timeout_interval = 5
-
+g_invoke_first = False
 def on_timeout():
-    global g_current_times, g_timeout_interval
-    g_current_times -= 1
-    if g_current_times <= 0:
+    global g_invoke_first
+    if g_invoke_first:
         mining_worker()
-        g_current_times = 12
-    write_log("Next execution %s mins later" % g_timeout_interval*g_current_times)
-    timer = Timer(g_timeout_interval * 60, on_timeout)
-    timer.start()
-"""
+    g_invoke_first = True
 
-if __name__ == "__main__":
-    # Run immediately first
-    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
-        mining_worker()
     now = datetime.datetime.now()
-    start_hour = 3
+    start_hour = 2
     if now.timetuple().tm_hour > start_hour:
         tomorrow = now + datetime.timedelta(days=1)
-        next_time = tomorrow.replace(hour=start_hour, minute=0, second=0)
+        next_time = tomorrow.replace(hour=start_hour, minute=30, second=0)
     else:
         next_time = now.replace(hour=start_hour, minute=0, second=0)
     interval = (next_time-now).seconds
     write_log("Next execution %d seconds later" % interval)
 
-    timer = Timer(interval, mining_worker)
+    timer = Timer(interval, on_timeout)
     timer.start()
+
+if __name__ == "__main__":
+    # Run immediately first
+    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+        g_invoke_first = True
+
+    on_timeout()
 

@@ -43,6 +43,14 @@ def cast_dataframe(df, casts):
 
 def random_walk(X, Y, steps, stride=1, n=1, noise=0.5, keep_origin=False):
     X = X.squeeze()
+    Y = Y.squeeze()
+
+    if len(X.shape) == 0 or len(Y.shape) == 0:
+        return None, None
+
+    if X.shape[0] <= 1 or Y.shape[0] <= 1:
+        return None, None
+
     derivatives = [Y]
     dX = np.diff(X)
     for i in range(n):
@@ -82,10 +90,15 @@ def predict_worker():
         if basename.startswith('.'): continue
         if extname.lower() != '.csv': continue
 
-        uid = int(basename)
-        up_info = up_list.loc[up_list['uid'] == uid].iloc[0]
-
         try:
+
+            uid = int(basename)
+            up_info = up_list.loc[up_list['uid'] == uid]
+            if up_info.shape[0] == 0:
+                write_log("No such up: %s" % uid, verbose=True)
+                raise "No such up."
+            up_info = up_info.iloc[0]
+
             df = pd.read_csv(os.path.join('../A', filename))
 
             casts = (
@@ -117,6 +130,11 @@ def predict_worker():
 
                 steps = 24//3 * 7*2
                 X_, Y_ = random_walk(X, Y, steps, n=1, stride=3)
+
+                if X_ is None or Y_ is None:
+                    write_log("Data is too less: %s" % filename, verbose=True)
+                    raise "Data is too less"
+
                 X_ = X_[:, np.newaxis]
                 Y_ = Y_[:, np.newaxis]
 
@@ -124,7 +142,7 @@ def predict_worker():
                     prediction = X_
 
                 prediction = np.hstack((prediction, Y_))
-            
+
             pred_df = pd.DataFrame(data=prediction, columns=['Time', 'FanNum', 'PlayNum'])
             casts = (('FanNum', parse_int), ('PlayNum', parse_int))
             cast_dataframe(pred_df, casts)
@@ -167,20 +185,30 @@ def on_timeout():
     timer.start()
 """
 
-if __name__ == "__main__":
-    # Run immediately first
-    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+g_invoke_first = False
+def on_timeout():
+    global g_invoke_first
+    if g_invoke_first:
         predict_worker()
+    g_invoke_first = True
+
     now = datetime.datetime.now()
     start_hour = 5
     if now.timetuple().tm_hour > start_hour:
         tomorrow = now + datetime.timedelta(days=1)
-        next_time = tomorrow.replace(hour=start_hour, minute=0, second=0)
+        next_time = tomorrow.replace(hour=start_hour, minute=30, second=0)
     else:
         next_time = now.replace(hour=start_hour, minute=0, second=0)
     interval = (next_time-now).seconds
     write_log("Next execution %d seconds later" % interval)
 
-    timer = Timer(interval, predict_worker)
+    timer = Timer(interval, on_timeout)
     timer.start()
+
+if __name__ == "__main__":
+    # Run immediately first
+    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+        g_invoke_first = True
+
+    on_timeout()
 

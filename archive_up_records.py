@@ -12,19 +12,28 @@ def write_log(s, verbose=True):
     with open('archive.log', 'a') as f:
         print(s, file=f)
 
+def parse_datetime(row, column, fmt='%Y-%m-%d %H:%M:%S'):
+    dt = row[column]
+    if isinstance(row[column], str):
+        dt = time.mktime(time.strptime(row[column].strip(), fmt))
+    return dt
+
 def archive_worker():
     agg_df = None
-    month = 10
+
+    today = datetime.date.today()
+    first_day = datetime.date(year=today.year, month=today.month, day=1)
+    month = today.month
     for filename in os.listdir(g_uprecords_dir):
         basename, extname = os.path.splitext(filename)
         if extname.lower() != ".csv": continue
 
         try:
-            datetime = time.strptime(basename, "%m-%d %H")
+            dt = time.strptime(basename, "%m-%d %H")
         except ValueError:
             continue
 
-        if datetime.tm_mon < month: continue
+        if dt.tm_mon < month: continue
 
         try:
             df = pd.read_csv(os.path.join(g_uprecords_dir, filename))
@@ -51,6 +60,9 @@ def archive_worker():
                 write_log("Loading alread existing file: %s" % file_path)
 
                 df = pd.read_csv(file_path)
+                timestamp = time.mktime(first_day.timetuple())
+                mask = df.apply(parse_datetime, axis=1, args=('Time',))
+                df = df.loc[mask < timestamp]
                 df = pd.concat((df, section), axis=0)
                 df.drop_duplicates(subset="Time")
             else:
@@ -58,35 +70,32 @@ def archive_worker():
             write_log("Saving file: %s" % file_path)
             df.to_csv(file_path, index=False)
 
-"""
-g_current_times = 0
-g_timeout_interval = 5
+g_invoke_first = False
 
 def on_timeout():
-    global g_current_times, g_timeout_interval
-    g_current_times -= 1
-    if g_current_times <= 0:
+    global g_invoke_first
+    if g_invoke_first:
         archive_worker()
-        g_current_times = 12
-    write_log("Next execution %s mins later" % g_timeout_interval*g_current_times)
-    timer = Timer(g_timeout_interval * 60, on_timeout)
-    timer.start()
-"""
+    g_invoke_first = True
 
-if __name__ == "__main__":
-    # Run immediately first
-    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
-        archive_worker()
     now = datetime.datetime.now()
-    start_hour = 4
+    start_hour = 3
     if now.timetuple().tm_hour > start_hour:
         tomorrow = now + datetime.timedelta(days=1)
-        next_time = tomorrow.replace(hour=start_hour, minute=0, second=0)
+        next_time = tomorrow.replace(hour=start_hour, minute=30, second=0)
     else:
         next_time = now.replace(hour=start_hour, minute=0, second=0)
     interval = (next_time-now).seconds
     write_log("Next execution %d seconds later" % interval)
 
-    timer = Timer(interval, archive_worker)
+    timer = Timer(interval, on_timeout)
     timer.start()
+
+
+if __name__ == "__main__":
+    # Run immediately first
+    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+        g_invoke_first = True
+
+    on_timeout()
 
